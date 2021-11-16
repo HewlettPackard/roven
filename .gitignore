@@ -1,0 +1,8 @@
+# releases
+build/
+
+# vscode
+.vscode/
+
+# intelij
+.idea/

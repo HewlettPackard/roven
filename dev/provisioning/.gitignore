@@ -1,0 +1,6 @@
+devid-provisioning-tool/
+swtpm-container/
+out/
+conf/server/*.crt
+conf/server/*.key
+*.srl
