@@ -1,0 +1,45 @@
+name: Tests
+
+on:
+  workflow_call: {}
+env:
+  GO_VERSION: 1.18.3
+
+jobs:
+  unit-test:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@2541b1294d2704b0964813337f33b291d3f8596b # v3.0.2
+    - uses: actions/setup-go@b22fbbc2921299758641fab08929b4ac52b32923 # v3.2.0
+      with:
+        go-version: ${{ env.GO_VERSION }}
+    - name: Test
+      run: make test-unit
+
+  integration-swtpm:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@2541b1294d2704b0964813337f33b291d3f8596b # v3.0.2
+    - uses: actions/setup-go@b22fbbc2921299758641fab08929b4ac52b32923 # v3.2.0
+      with:
+        go-version: ${{ env.GO_VERSION }}
+    - name: Build binaries
+      run: make build
+    - uses: engineerd/setup-kind@aa272fe2a7309878ffc2a81c56cfe3ef108ae7d0 # v0.5.0
+      with:
+        version: v0.14.0
+        skipClusterCreation: true
+    - uses: yokawasa/action-setup-kube-tools@f7f73d7965074b0f5491b7210ff51e3254d42058 # v0.8.2
+      with:
+        setup-tools: |
+          kubectl
+        kubectl: '1.23.8'
+    - name: Install socat
+      run: sudo apt-get update; sudo apt-get install socat -y
+    - name: Setup swtpm
+      env:
+        DEFAULT_TPM_SOCKET: /home/runner/k8s-mount/swtpm.sock
+        MOUNT_DIR: /home/runner/k8s-mount
+      run: ./test/integration/util/setup-swtpm.sh
+    - name: Run integration tests
+      run: make test-integration

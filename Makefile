@@ -23,8 +23,14 @@ build: $(BUILD_TARGETS)
 $(BUILD_TARGETS):
 	CGO_ENABLED=0 GOOS=$(target_os) GOARCH=$(target_architecture) go build -ldflags="-s -w -extldflags -static" -o $(BUILD_DIR)/$(target_os)/$(target_architecture)/$(target_binary) cmd/$(target_binary)/main.go
 
-test:
+test: test-unit test-integration
 	go test ./...
+
+test-unit:
+	go test ./...
+
+test-integration:
+	bash ./test/integration/run.sh
 
 docker: $(DOCKER_TARGETS)
 $(DOCKER_TARGETS):

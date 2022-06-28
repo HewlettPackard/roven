@@ -1,0 +1,9 @@
+name: Nightly Build
+
+on:
+  schedule:
+    - cron: '0 2 * * *'
+
+jobs:
+  tests:
+    uses: ./.github/workflows/tests.yaml

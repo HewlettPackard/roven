@@ -10,6 +10,7 @@ DEFAULT_TPM_STATE?="../manufacture-tpm/output/tpm2-00.permall"
 ## Builds the provisioning tool binaries
 build: clean
 	git clone https://github.com/HewlettPackard/devid-provisioning-tool.git
+	(cd devid-provisioning-tool; git reset --hard b912ef2c19571093dfacd0a6721dd1e6f6299768)
 	(cd devid-provisioning-tool; make build)
 
 	mkdir $(OUT_DIR)
@@ -59,6 +60,7 @@ setup-provisioning:
 ## Setups and runs swtpm in a container
 run-swtpm: clean-swtpm
 	git clone https://github.com/marcosy/swtpm-container.git
+	(cd swtpm-container; git reset --hard 3317c944b61067bba95e5638a1fd23d0642284fd)
 	(cd swtpm-container/manufacture-tpm; ./run.sh)
 	(cd swtpm-container/run-tpm; ./run.sh $(DEFAULT_TPM_STATE) $(DEFAULT_TPM_SOCKET))
 

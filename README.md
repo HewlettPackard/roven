@@ -1,3 +1,5 @@
+[![PR Build](https://github.com/jufantozzi/devid-temp/actions/workflows/pr-build.yaml/badge.svg)](https://github.com/jufantozzi/devid-temp/actions/workflows/pr-build.yaml)
+
 # Roven
 
 Roven is a hybrid, external node attestor plugin for SPIRE, and it combines the power of two built in plugins: `k8s_psat` and `tpm_devid`.
