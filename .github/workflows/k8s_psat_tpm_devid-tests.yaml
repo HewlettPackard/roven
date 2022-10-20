@@ -1,7 +1,14 @@
 name: Tests
 
 on:
-  workflow_call: {}
+  workflow_call:
+    paths:
+    - 'k8s_psat_tpm_devid/**'
+
+defaults:
+  run:
+    working-directory: k8s_psat_tpm_devid
+
 env:
   GO_VERSION: 1.18.3
 

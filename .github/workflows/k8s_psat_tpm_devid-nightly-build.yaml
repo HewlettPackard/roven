@@ -4,6 +4,10 @@ on:
   schedule:
     - cron: '0 2 * * *'
 
+defaults:
+  run:
+    working-directory: k8s_psat_tpm_devid
+
 jobs:
   tests:
     uses: ./.github/workflows/tests.yaml
