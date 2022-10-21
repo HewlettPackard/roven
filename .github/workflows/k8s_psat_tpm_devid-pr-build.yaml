@@ -1,7 +1,14 @@
 name: PR Build
 
 on:
-  pull_request: {}
+  pull_request:
+    paths:
+    - 'k8s_psat_tpm_devid/**'
+
+defaults:
+  run:
+    working-directory: k8s_psat_tpm_devid
+
 env:
   GO_VERSION: 1.18.3
 
@@ -16,7 +23,8 @@ jobs:
     - name: Lint
       uses: golangci/golangci-lint-action@537aa1903e5d359d0b27dbc19ddd22c5087f3fbc # v3.2.0
       with:
-        go-version: ${{ env.GO_VERSION }}
+        version: v1.50.0 # golangci-lint version
+        working-directory: k8s_psat_tpm_devid
 
   tests:
-    uses: ./.github/workflows/tests.yaml
+    uses: ./.github/workflows/k8s_psat_tpm_devid-tests.yaml
