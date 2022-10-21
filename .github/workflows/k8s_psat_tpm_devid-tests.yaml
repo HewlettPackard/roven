@@ -1,9 +1,7 @@
 name: Tests
 
 on:
-  workflow_call:
-    paths:
-    - 'k8s_psat_tpm_devid/**'
+  workflow_call: {}
 
 defaults:
   run:
