@@ -10,4 +10,4 @@ defaults:
 
 jobs:
   tests:
-    uses: ./.github/workflows/tests.yaml
+    uses: ./.github/workflows/k8s_psat_tpm_devid-tests.yaml
