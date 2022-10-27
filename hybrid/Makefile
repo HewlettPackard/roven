@@ -1,11 +1,13 @@
 .ONESHELL:
 
-BINARIES ?= hybrid_attestor_server hybrid_agent
+EKS_DIR ?= ./dev/kubernetes
+BINARIES ?= hybrid_server hybrid_agent
 OSES ?= linux
 ARCHITECTURES ?= amd64 arm64
-VERSION ?= develop
-DOCKER_REGISTRY ?= docker.io
+VERSION ?= latest
+DOCKER_REGISTRY ?= public.ecr.aws/n9c4h4j5
 DOCKER_REPOSITORY_PREFIX ?= myhub
+DOCKER_TAG_AGENT ?= hybrid-attestor-server:latest hybrid-attestor-agent:latest 
 BUILD_DIR ?= ./build
 PLATFORMS ?= $(foreach os, $(OSES), $(foreach architecture, $(ARCHITECTURES), --platform $(os)/$(architecture)))
 
@@ -16,8 +18,9 @@ target_words = $(subst -, ,$@)
 target_binary = $(word 1, $(target_words))
 target_os = $(word 2, $(target_words))
 target_architecture = $(word 3, $(target_words))
+target_software_type = $(word 2, $(subst _, ,$(target_binary)))
 
-target_binary_hyphens = $(subst _,-,$(target_binary))
+target_binary_hyphens = $(subst _,-attestor-,$(target_binary))
 
 build: $(BUILD_TARGETS)
 $(BUILD_TARGETS):
@@ -34,11 +37,16 @@ test-integration:
 
 docker: $(DOCKER_TARGETS)
 $(DOCKER_TARGETS):
-	docker build -f ./dev/docker/Dockerfile $(PLATFORMS) --build-arg BINARY=$(target_binary) -t $(DOCKER_REGISTRY)/$(DOCKER_REPOSITORY_PREFIX)/$(target_binary_hyphens):$(VERSION) .
-	docker push $(DOCKER_REGISTRY)/$(DOCKER_REPOSITORY_PREFIX)/$(target_binary_hyphens):$(VERSION)
+	docker build -f ./dev/docker/$(target_software_type).Dockerfile $(PLATFORMS) --build-arg BINARY=$(target_binary) -t $(DOCKER_REGISTRY)/$(target_binary_hyphens):$(VERSION) .
+	docker push $(DOCKER_REGISTRY)/$(target_binary_hyphens):$(VERSION)
 
 docker-build:
 	CGO_ENABLED=0 GOOS=$(TARGETOS) GOARCH=$(TARGETARCH) go build -ldflags="-s -w -extldflags -static" -o ${BINARY} cmd/${BINARY}/main.go
+
+deploy-agent-server-eks:
+	kubectl delete --all daemonsets.app --namespace=spire
+	kubectl delete --all statefulset.app --namespace=spire
+	kubectl apply -k "${EKS_DIR}"
 
 clean:
 	rm -rf $(BUILD_DIR)

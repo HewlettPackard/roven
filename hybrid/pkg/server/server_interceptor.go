@@ -7,7 +7,7 @@ import (
 	nodeattestorv1 "github.com/spiffe/spire-plugin-sdk/proto/spire/plugin/server/nodeattestor/v1"
 )
 
-type HybridPluginServerInterceptorInterface interface {
+type ServerInterceptorInterface interface {
 	Recv() (*nodeattestorv1.AttestRequest, error)
 	Send(resp *nodeattestorv1.AttestResponse) error
 	setCustomStream(stream nodeattestorv1.NodeAttestor_AttestServer)

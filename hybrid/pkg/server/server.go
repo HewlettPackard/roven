@@ -37,10 +37,16 @@ type HybridPluginServer struct {
 	agentstorev1.UnimplementedAgentStoreServer
 	nodeattestorv1.UnsafeNodeAttestorServer
 	configv1.UnsafeConfigServer
-	log    hclog.Logger
-	store  agentstorev1.AgentStoreServiceClient
-	mtx    sync.RWMutex
-	broker pluginsdk.ServiceBroker
+	log         hclog.Logger
+	store       agentstorev1.AgentStoreServiceClient
+	mtx         sync.RWMutex
+	broker      pluginsdk.ServiceBroker
+	interceptor ServerInterceptorInterface
+}
+
+func New() *HybridPluginServer {
+	interceptor := new(HybridPluginServerInterceptor)
+	return &HybridPluginServer{interceptor: interceptor}
 }
 
 func (p *HybridPluginServer) SetLogger(logger hclog.Logger) {
