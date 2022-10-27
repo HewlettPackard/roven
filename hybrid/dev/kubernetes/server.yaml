@@ -70,9 +70,9 @@ data:
               }
             }
             aws_iid {
-              access_key_id = "AKIA2TBVORN5Q4BYTKMQ"
-              secret_access_key = "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"
-              assume_role = "NodeAttestorHybrid"
+              access_key_id = $AWS_KEY_ID
+              secret_access_key = $AWS_ACCESS_KEY
+              assume_role = $AWS_ROLE
             }
           }
         }
