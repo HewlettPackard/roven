@@ -194,7 +194,7 @@ func reverse(s string) (result string) {
 	return
 }
 
-func initPlugins(pluginList []string) ([]common.Types, error) {
+func (p *HybridPluginServer) initPlugins(pluginList []string) ([]common.Types, error) {
 	attestors := make([]common.Types, 0)
 
 	for i := 0; i < len(pluginList); i++ {

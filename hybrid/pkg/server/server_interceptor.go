@@ -28,9 +28,9 @@ type HybridPluginServerInterceptor struct {
 	logger            hclog.Logger
 	req               *nodeattestorv1.AttestRequest
 	Response          *nodeattestorv1.AttestResponse
-	CombinedSelectors []string
-	SpiffeID          string
-	CanReattest       []bool
+	combinedSelectors []string
+	spiffeID          string
+	canReattest       []bool
 }
 
 func (m *HybridPluginServerInterceptor) Recv() (*nodeattestorv1.AttestRequest, error) {
