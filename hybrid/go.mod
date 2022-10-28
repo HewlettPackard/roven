@@ -9,6 +9,7 @@ require (
 	github.com/hashicorp/hcl v1.0.1-0.20190430135223-99e2f22d1c94
 	github.com/spiffe/spire v0.0.0-00010101000000-000000000000
 	github.com/spiffe/spire-plugin-sdk v1.4.4
+	github.com/stretchr/testify v1.8.1
 	google.golang.org/grpc v1.50.1
 )
 
@@ -86,6 +87,7 @@ require (
 	github.com/oklog/run v1.0.0 // indirect
 	github.com/pkg/browser v0.0.0-20210911075715-681adbf594b8 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
+	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/prometheus/client_golang v1.13.0 // indirect
 	github.com/prometheus/client_model v0.2.0 // indirect
 	github.com/prometheus/common v0.37.0 // indirect
@@ -94,7 +96,6 @@ require (
 	github.com/spf13/pflag v1.0.5 // indirect
 	github.com/spiffe/go-spiffe/v2 v2.0.1-0.20220414143532-2ed460a8b9d3 // indirect
 	github.com/spiffe/spire-api-sdk v1.2.5-0.20221020001527-5895a0279944 // indirect
-	github.com/stretchr/objx v0.5.0 // indirect
 	github.com/twmb/murmur3 v1.1.6 // indirect
 	github.com/uber-go/tally/v4 v4.1.3 // indirect
 	github.com/zeebo/errs v1.3.0 // indirect
