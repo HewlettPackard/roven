@@ -13,9 +13,14 @@ import (
 	nodeattestorv1 "github.com/spiffe/spire-plugin-sdk/proto/spire/plugin/agent/nodeattestor/v1"
 	configv1 "github.com/spiffe/spire-plugin-sdk/proto/spire/service/common/config/v1"
 	"github.com/spiffe/spire/pkg/agent/plugin/nodeattestor/awsiid"
+	"github.com/spiffe/spire/pkg/agent/plugin/nodeattestor/azuremsi"
+	"github.com/spiffe/spire/pkg/agent/plugin/nodeattestor/gcpiit"
+	"github.com/spiffe/spire/pkg/agent/plugin/nodeattestor/k8spsat"
 	grpc "google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+
+	"github.com/stretchr/testify/require"
 )
 
 var pluginsString = `plugins {
@@ -47,44 +52,39 @@ func TestMethodsThatParseHclConfig(t *testing.T) {
 
 	pluginAstNode, err := plugin.decodeStringAndTransformToAstNode(pluginsString)
 
-	if len(pluginAstNode) != 2 {
-		t.Error("Could not transform HCL string configuration.", err)
-	}
-
-	if pluginAstNode["aws_iid"] == nil || pluginAstNode["k8s_psat"] == nil {
-		t.Error("Could access loaded plugins by index.", pluginAstNode)
-	}
+	require.NoError(t, err, "Error decoding test string")
+	require.Len(t, pluginAstNode, 2, "Could not transform HCL string configuration: %w", err)
+	require.Contains(t, pluginAstNode, "k8s_psat", "Could not access k8s_psat plugin by index on ast node")
+	require.Contains(t, pluginAstNode, "aws_iid", "Could not access aws_iid plugin by index on ast node")
 
 	pluginNames, pluginsData := plugin.parseReceivedData(pluginAstNode)
 
-	if len(pluginNames) != 2 && pluginNames[0] != "k8s_psat" && pluginNames[1] != "aws_iid" {
-		t.Error("Could not transform HCL received data into map and extract plugins names")
-	}
+	require.Len(t, pluginNames, 2, "Could not parse plugin names")
+	require.Contains(t, pluginNames, "k8s_psat", "Could not access k8s_psat plugin by index after parsing")
+	require.Contains(t, pluginNames, "aws_iid", "Could not access aws_iid plugin by index after parsing")
 
-	if len(pluginsData) != 2 &&
-		pluginsData["aws_iid"] != "accountId = 728109058939" &&
-		pluginsData["k8s_psat"] != `cluster = "hybrid-node-attestor"` {
-		t.Error("Could not transform HCL received data into map and extract plugins names")
-	}
+	require.Len(t, pluginsData, 2, "Could not parse plugin data")
+	require.Contains(t, pluginsData, "k8s_psat", "Could not access k8s_psat plugin by index after parsing")
+	require.Equal(t, "\n  cluster = \"hybrid-node-attestor\"\n", pluginsData["k8s_psat"], "k8s_psat plugin data was not extracted properly")
+	require.Contains(t, pluginsData, "aws_iid", "Could not access aws_iid plugin by index after parsing")
+	require.Equal(t, "\n  accountId = 728109058939\n", pluginsData["aws_iid"], "aws_iid plugin data was not extracted properly")
 }
 
 func TestSupportedPluginsInitialization(t *testing.T) {
 	interceptor := new(InterceptorWrapper)
 	plugin := HybridPluginAgent{interceptor: interceptor}
 
-	types, err := plugin.initPlugins([]string{"aws_iid", "k8s_psat", "azure_msi", "gcp_iit"})
-	awsPluginType := awsiid.IIDAttestorPlugin{}
+	plugins, err := plugin.initPlugins([]string{"aws_iid", "k8s_psat", "azure_msi", "gcp_iit"})
 
-	if reflect.TypeOf(types[0].Plugin) != reflect.TypeOf(&awsPluginType) && err != nil {
-		t.Error("Cannot init plugins properly")
-	}
+	require.NoError(t, err, "Error initializing supported plugins: %w", err)
+	require.IsType(t, &awsiid.IIDAttestorPlugin{}, plugins[0].Plugin, "Could not initialize aws_iid plugin")
+	require.IsType(t, &k8spsat.AttestorPlugin{}, plugins[1].Plugin, "Could not initialize k8s_psat plugin")
+	require.IsType(t, &azuremsi.MSIAttestorPlugin{}, plugins[2].Plugin, "Could not initialize azure_msi plugin")
+	require.IsType(t, &gcpiit.IITAttestorPlugin{}, plugins[3].Plugin, "Could not initialize gcp_iit plugin")
 
-	types, err = plugin.initPlugins([]string{"aws_iid_test", "k8s_psat_test"})
-
-	if len(types) > 0 {
-
-		t.Error("Cannot init plugins properly")
-	}
+	plugins, err = plugin.initPlugins([]string{"aws_iid_test", "k8s_psat_test"})
+	require.Error(t, err, "Error initializing supported plugins: %w", err)
+	require.Len(t, plugins, 0, "Plugin list length should be 0 on unknown plugin names")
 
 }
 
