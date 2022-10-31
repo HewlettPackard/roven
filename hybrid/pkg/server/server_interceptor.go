@@ -15,6 +15,10 @@ type ServerInterceptorInterface interface {
 	Context() context.Context
 	SetLogger(logger hclog.Logger)
 	SetReq(req *nodeattestorv1.AttestRequest)
+	CanReattest() []bool
+	SpiffeID() string
+	CombinedSelectors() []string
+	Stream() nodeattestorv1.NodeAttestor_AttestServer
 }
 
 type HybridPluginServerInterceptor struct {
@@ -24,9 +28,9 @@ type HybridPluginServerInterceptor struct {
 	logger            hclog.Logger
 	req               *nodeattestorv1.AttestRequest
 	Response          *nodeattestorv1.AttestResponse
-	CombinedSelectors []string
-	SpiffeID          string
-	CanReattest       []bool
+	combinedSelectors []string
+	spiffeID          string
+	canReattest       []bool
 }
 
 func (m *HybridPluginServerInterceptor) Recv() (*nodeattestorv1.AttestRequest, error) {
@@ -40,12 +44,12 @@ func (m *HybridPluginServerInterceptor) setCustomStream(stream nodeattestorv1.No
 func (m *HybridPluginServerInterceptor) Send(resp *nodeattestorv1.AttestResponse) error {
 	switch x := resp.Response.(type) {
 	case *nodeattestorv1.AttestResponse_AgentAttributes:
-		m.CombinedSelectors = append(m.CombinedSelectors, x.AgentAttributes.SelectorValues...)
-		if len(m.SpiffeID) == 0 {
-			m.SpiffeID = x.AgentAttributes.SpiffeId
+		m.combinedSelectors = append(m.combinedSelectors, x.AgentAttributes.SelectorValues...)
+		if len(m.spiffeID) == 0 {
+			m.spiffeID = x.AgentAttributes.SpiffeId
 		}
 
-		m.CanReattest = append(m.CanReattest, x.AgentAttributes.CanReattest)
+		m.canReattest = append(m.canReattest, x.AgentAttributes.CanReattest)
 	default:
 	}
 
@@ -66,4 +70,20 @@ func (m *HybridPluginServerInterceptor) SetLogger(logger hclog.Logger) {
 
 func (m *HybridPluginServerInterceptor) SetReq(req *nodeattestorv1.AttestRequest) {
 	m.req = req
+}
+
+func (m *HybridPluginServerInterceptor) CanReattest() []bool {
+	return m.canReattest
+}
+
+func (m *HybridPluginServerInterceptor) SpiffeID() string {
+	return m.spiffeID
+}
+
+func (m *HybridPluginServerInterceptor) CombinedSelectors() []string {
+	return m.combinedSelectors
+}
+
+func (m *HybridPluginServerInterceptor) Stream() nodeattestorv1.NodeAttestor_AttestServer {
+	return m.stream
 }
