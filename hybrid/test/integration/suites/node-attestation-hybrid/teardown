@@ -1,0 +1,3 @@
+#!/bin/bash
+
+trap cleanup-logs EXIT

@@ -34,7 +34,7 @@ type HybridPluginServer struct {
 	pluginList []common.Types
 	nodeattestorbase.Base
 	agentstorev1.UnimplementedAgentStoreServer
-	nodeattestorv1.UnimplementedNodeAttestorServer // UnsafeNodeAttestorServer
+	nodeattestorv1.UnimplementedNodeAttestorServer
 	configv1.UnsafeConfigServer
 
 	logger      hclog.Logger
