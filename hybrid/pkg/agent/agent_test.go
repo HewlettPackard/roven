@@ -176,14 +176,10 @@ func TestHybridPluginAgentInterceptorAndAidAttestation(t *testing.T) {
 	interceptor.setCustomStream(&stream)
 	customStream, _ := interceptor.Recv()
 	require.Equal(t, []byte("customStream"), customStream.Challenge, "Could not set custom stream on interceptor")
-	// if bytes.Compare([]byte("customStream"), customStream.Challenge) != 0 {
-	// 	t.Error("Could not set custom stream")
-	// }
 
 	interceptor.SetContext(context.WithValue(context.Background(), "testkey", "testval"))
 	customContext := interceptor.Context()
 	require.Equal(t, "testval", customContext.Value("testkey"), "Could not set interceptor context")
-	// require.IsType(t, context.Background(), customContext, "Could not set custom context on interceptor")
 
 	interceptor.SetLogger(hclog.Default().Named("test_logger"))
 	require.Equal(t, "test_logger", interceptor.logger.Name(), "Could not set interceptor logger")
@@ -242,34 +238,18 @@ func TestHybridPluginAgentInterceptorAndAidAttestation(t *testing.T) {
 
 	aidAttestation := hybridPlugin.AidAttestation(stream)
 	require.NoError(t, aidAttestation, "AidAttestation of hybrid plugin fails")
-	// if aidAttestation != nil {
-	// 	t.Error("AidAttestation of hybrid plugin fails")
-	// }
-
 	interceptorFake.SetReturnError(true)
 
 	aidAttestation = hybridPlugin.AidAttestation(stream)
 	require.Error(t, aidAttestation, "AidAttestation of hybrid plugin fails")
-	// if aidAttestation == nil {
-	// 	t.Error("AidAttestation of hybrid plugin fails")
-	// }
-
-	// ********** Log test
 
 	hybridPlugin.SetLogger(hclog.Default().Named("test_logger2"))
 	require.Equal(t, "test_logger2", hybridPlugin.logger.Name(), "Could not set hybrid plugin logger")
-
-	// if hybridPlugin.logger != hclog.Default() {
-	// 	t.Error("Could not set logger for hybrid plugin")
-	// }
 
 	expectedError = status.Error(codes.InvalidArgument, "Plugin initialization error")
 	hybridPlugin.initStatus = expectedError
 	aidAttestation = hybridPlugin.AidAttestation(stream)
 	require.EqualError(t, aidAttestation, expectedError.Error(), "AidAttestation of hybrid plugin fails")
-	// if aidAttestation.Error() != expectedError.Error() {
-	// 	t.Error("Plugin started without associated plugins configured")
-	// }
 
 	pluginOne = new(FakePlugin)
 	pluginTwo = new(FakePlugin)
