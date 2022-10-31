@@ -76,5 +76,5 @@ Change the credentials in the server.yaml and agent.yaml that are in the hybrid/
 
 `make deploy-agent-server-eks`
 
-You should now be able to see the running agent/server node attestor. First set the corresponding environment variables with their required values ($AWS_KEY_ID, $AWS_ACCESS_KEY, $AWS_ROLE, $ACCOUNT_ID)
+You should now be able to see the running agent/server node attestor. First set the corresponding environment variables with their required values ($AWS_SECRET_ACCESS_KEY, $AWS_ACCESS_KEY_ID, $AWS_ASSUME_ROLE, $AWS_ACCOUNT_ID)
 
