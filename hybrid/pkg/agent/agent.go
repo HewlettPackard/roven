@@ -136,15 +136,6 @@ func (p *HybridPluginAgent) initPlugins(pluginList []string) ([]common.Types, er
 		case "gcp_iit":
 			plugin.PluginName = "gcp_iit"
 			plugin.Plugin = gcpiit.New()
-		// case "tpm_devid":
-		// 	plugin.PluginName = "tpm_devid"
-		// 	plugin.Plugin = tpmdevid.New()
-		// case "sshpop":
-		// 	plugin.PluginName = "sshpop"
-		// 	plugin.Plugin = sshpop.New()
-		// case "x509pop":
-		// 	plugin.PluginName = "x509pop"
-		// 	plugin.Plugin = x509pop.New()
 		default:
 			plugin.PluginName = ""
 			plugin.Plugin = nil

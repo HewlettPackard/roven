@@ -35,7 +35,7 @@ data:
               cluster = "hybrid-node-attestor"
             }
             aws_iid {
-              accountId = 728109058939   
+              accountId = $AWS_ACCOUNT_ID
             }
           }
         }

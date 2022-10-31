@@ -5,8 +5,7 @@ BINARIES ?= hybrid_server hybrid_agent
 OSES ?= linux
 ARCHITECTURES ?= amd64 arm64
 VERSION ?= latest
-DOCKER_REGISTRY ?= public.ecr.aws/n9c4h4j5
-DOCKER_REPOSITORY_PREFIX ?= myhub
+DOCKER_HUB ?= ${DOCKER_HUB}
 DOCKER_TAG_AGENT ?= hybrid-attestor-server:latest hybrid-attestor-agent:latest 
 BUILD_DIR ?= ./build
 PLATFORMS ?= $(foreach os, $(OSES), $(foreach architecture, $(ARCHITECTURES), --platform $(os)/$(architecture)))
@@ -37,16 +36,17 @@ test-integration:
 
 docker: $(DOCKER_TARGETS)
 $(DOCKER_TARGETS):
-	docker build -f ./dev/docker/$(target_software_type).Dockerfile $(PLATFORMS) --build-arg BINARY=$(target_binary) -t $(DOCKER_REGISTRY)/$(target_binary_hyphens):$(VERSION) .
-	docker push $(DOCKER_REGISTRY)/$(target_binary_hyphens):$(VERSION)
+	docker build -f ./dev/docker/$(target_software_type).Dockerfile $(PLATFORMS) --build-arg BINARY=$(target_binary) -t $(DOCKER_HUB)/$(target_binary_hyphens):$(VERSION) .
+	# docker push $(DOCKER_HUB)/$(target_binary_hyphens):$(VERSION)
 
 docker-build:
 	CGO_ENABLED=0 GOOS=$(TARGETOS) GOARCH=$(TARGETARCH) go build -ldflags="-s -w -extldflags -static" -o ${BINARY} cmd/${BINARY}/main.go
 
-deploy-agent-server-eks:
+deploy-spire-eks:
 	kubectl delete --all daemonsets.app --namespace=spire
 	kubectl delete --all statefulset.app --namespace=spire
-	kubectl apply -k "${EKS_DIR}"
+	envsubst < $(EKS_DIR)/server.yaml | kubectl apply -f -
+	envsubst < $(EKS_DIR)/agent.yaml | kubectl apply -f -
 
 clean:
 	rm -rf $(BUILD_DIR)
