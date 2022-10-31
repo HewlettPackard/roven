@@ -5,23 +5,36 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"reflect"
 	"testing"
 
 	hclog "github.com/hashicorp/go-hclog"
 	"github.com/hewlettpackard/hybrid/pkg/common"
+	"github.com/spiffe/go-spiffe/v2/spiffeid"
 	nodeattestorv1 "github.com/spiffe/spire-plugin-sdk/proto/spire/plugin/agent/nodeattestor/v1"
 	configv1 "github.com/spiffe/spire-plugin-sdk/proto/spire/service/common/config/v1"
 	"github.com/spiffe/spire/pkg/agent/plugin/nodeattestor/awsiid"
 	"github.com/spiffe/spire/pkg/agent/plugin/nodeattestor/azuremsi"
 	"github.com/spiffe/spire/pkg/agent/plugin/nodeattestor/gcpiit"
 	"github.com/spiffe/spire/pkg/agent/plugin/nodeattestor/k8spsat"
+	"github.com/spiffe/spire/pkg/common/catalog"
+	"github.com/spiffe/spire/test/plugintest"
 	grpc "google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
 	"github.com/stretchr/testify/require"
 )
+
+func BuiltIn() catalog.BuiltIn {
+	return builtin(&HybridPluginAgent{})
+}
+
+func builtin(p *HybridPluginAgent) catalog.BuiltIn {
+	return catalog.MakeBuiltIn("hybrid-node-attestor",
+		nodeattestorv1.NodeAttestorPluginServer(p),
+		configv1.ConfigServiceServer(p),
+	)
+}
 
 var pluginsString = `plugins {
 		k8s_psat {
@@ -39,12 +52,28 @@ var pluginsStringInvalidData = `plugins {
 		}
 	  }`
 
+var pluginsStringErrorData = `plugins {
+k8s_psat {
+}
+aws_iid {
+	accountId {
+		error=true
+	}
+}
+}`
+
 var pluginsStringEmptyData = `plugins {}`
 var payloadOneData = `{"cluster":"hybrid-node-attestor_fake","token":"part1.part2.part3-part4-part5--part6-part7"}`
 var payloadTwoData = `{"document":"{\n  \"accountId\" : \"123456789_TEST\",\n  \"architecture\" : \"x86_64\",\n  \"availabilityZone\" : \"us-east-2a\",\n  \"billingProducts\" : null,\n  \"devpayProductCodes\" : null,\n  \"marketplaceProductCodes\" : null,\n  \"imageId\" : \"ami-010203040506\",\n  \"instanceId\" : \"i-010203040506\",\n  \"instanceType\" : \"m5.large\",\n  \"kernelId\" : null,\n  \"pendingTime\" : \"2022-09-22T03:22:21Z\",\n  \"privateIp\" : \"192.168.77.116\",\n  \"ramdiskId\" : null,\n  \"region\" : \"us-east-2\",\n  \"version\" : \"2017-09-30\"\n}","signature":"eO4+90PuN8bZaIJjpBe1/mAzPhvSrrhLATwPFaOPzK5ZSUpsbVOuK2tXjMYkx+ora7mcaL0G45li\nbZLGUIee+DF/YZ8/5RuNf1Z8yn+5e2AqLvNhIsF5IOVZWk8yDvl/jBJCcW8GaRblldWdMoDiC2OA\nqVyRjyJCXUySNu0JADE="}`
 var payloadThreeData = `{1,2,3,4,}`
 
 // ------------------------------------------------------------------------------------------------------------------------
+
+func TestNew(t *testing.T) {
+	hybridPlugin := New()
+	require.NotNil(t, hybridPlugin, "New should return a non-nil value")
+	require.IsType(t, &HybridPluginAgent{}, hybridPlugin, "New should return a HybridPluginAgent")
+}
 
 func TestMethodsThatParseHclConfig(t *testing.T) {
 	interceptor := new(InterceptorWrapper)
@@ -89,34 +118,54 @@ func TestSupportedPluginsInitialization(t *testing.T) {
 }
 
 func TestHybridPluginConfiguration(t *testing.T) {
+	var errConfig error
+	coreConfig := catalog.CoreConfig{
+		TrustDomain: spiffeid.RequireTrustDomainFromString("example.org"),
+	}
+
 	interceptor := new(InterceptorWrapper)
 	plugin := HybridPluginAgent{interceptor: interceptor}
 
-	req := configv1.ConfigureRequest{HclConfiguration: pluginsString}
+	plugintest.Load(t, builtin(&plugin), nil,
+		plugintest.CaptureConfigureError(&errConfig),
+		plugintest.CoreConfig(coreConfig),
+		plugintest.Configure(pluginsString),
+	)
+	require.NoError(t, errConfig, "Error configuring plugin: %w", errConfig)
+	require.Len(t, plugin.pluginList, 2, "Plugins used by Hybrid node attestor failed to start.")
 
-	_, errConfig := plugin.Configure(context.Background(), &req)
+	interceptor = new(InterceptorWrapper)
+	plugin = HybridPluginAgent{interceptor: interceptor}
 
-	if len(plugin.pluginList) == 0 || errConfig != nil {
-		t.Error("Plugins used by Hybrid node attestor failed to start.")
-	}
+	plugintest.Load(t, builtin(&plugin), nil,
+		plugintest.CaptureConfigureError(&errConfig),
+		plugintest.CoreConfig(coreConfig),
+		plugintest.Configure(pluginsStringInvalidData),
+	)
+	require.EqualError(t, errConfig, "rpc error: code = FailedPrecondition desc = Some of the supplied plugins are not supported or are invalid", "Error configuring plugin: %w", errConfig)
+	require.Len(t, plugin.pluginList, 0, "All plugins used by Hybrid node attestor should fail on config with unsupported plugins.")
 
-	req = configv1.ConfigureRequest{HclConfiguration: pluginsStringInvalidData}
+	interceptor = new(InterceptorWrapper)
+	plugin = HybridPluginAgent{interceptor: interceptor}
 
-	_, errConfig = plugin.Configure(context.Background(), &req)
+	plugintest.Load(t, builtin(&plugin), nil,
+		plugintest.CaptureConfigureError(&errConfig),
+		plugintest.CoreConfig(coreConfig),
+		plugintest.Configure(pluginsStringEmptyData),
+	)
 
-	if errConfig == nil {
-		t.Error("Plugins used by Hybrid node attestor failed to start.")
-	}
+	require.EqualError(t, errConfig, "rpc error: code = FailedPrecondition desc = No plugins supplied", "Error configuring plugin: %w", errConfig)
+	require.Len(t, plugin.pluginList, 0, "Hybrid node attestor should load no plugins on empty config.")
 
-	req = configv1.ConfigureRequest{HclConfiguration: pluginsStringEmptyData}
+	interceptor = new(InterceptorWrapper)
+	plugin = HybridPluginAgent{interceptor: interceptor}
 
-	_, errConfig = plugin.Configure(context.Background(), &req)
-
-	error := status.Error(codes.FailedPrecondition, "No plugins supplied")
-
-	if errConfig == nil || errConfig.Error() != error.Error() {
-		t.Error("Plugins used by Hybrid node attestor failed to start.")
-	}
+	plugintest.Load(t, builtin(&plugin), nil,
+		plugintest.CaptureConfigureError(&errConfig),
+		plugintest.CoreConfig(coreConfig),
+		plugintest.Configure(pluginsStringErrorData),
+	)
+	require.EqualError(t, errConfig, "rpc error: code = Internal desc = Error configuring one of the supplied plugins.", "Error configuring plugin: %w", errConfig)
 }
 
 func TestHybridPluginAgentInterceptorAndAidAttestation(t *testing.T) {
@@ -126,20 +175,18 @@ func TestHybridPluginAgentInterceptorAndAidAttestation(t *testing.T) {
 
 	interceptor.setCustomStream(&stream)
 	customStream, _ := interceptor.Recv()
-	if bytes.Compare([]byte("customStream"), customStream.Challenge) != 0 {
-		t.Error("Could not set custom stream")
-	}
+	require.Equal(t, []byte("customStream"), customStream.Challenge, "Could not set custom stream on interceptor")
+	// if bytes.Compare([]byte("customStream"), customStream.Challenge) != 0 {
+	// 	t.Error("Could not set custom stream")
+	// }
 
-	interceptor.SetContext(context.Background())
+	interceptor.SetContext(context.WithValue(context.Background(), "testkey", "testval"))
 	customContext := interceptor.Context()
-	if reflect.TypeOf(context.Background()) != reflect.TypeOf(customContext) {
-		t.Error("Could not set interceptor context")
-	}
+	require.Equal(t, "testval", customContext.Value("testkey"), "Could not set interceptor context")
+	// require.IsType(t, context.Background(), customContext, "Could not set custom context on interceptor")
 
-	interceptor.SetLogger(hclog.Default())
-	if reflect.TypeOf(hclog.Default()) != reflect.TypeOf(interceptor.logger) {
-		t.Error("Could not set interceptor logger")
-	}
+	interceptor.SetLogger(hclog.Default().Named("test_logger"))
+	require.Equal(t, "test_logger", interceptor.logger.Name(), "Could not set interceptor logger")
 
 	payloadEmpty := interceptor.payload
 
@@ -169,29 +216,20 @@ func TestHybridPluginAgentInterceptorAndAidAttestation(t *testing.T) {
 	unmarshaledPayload, err_ := interceptor.unmarshalPayloadData(combinedByteArray)
 
 	typeOf := new([]map[string]interface{})
-	if reflect.TypeOf(&unmarshaledPayload) != reflect.TypeOf(typeOf) {
-		t.Error("Failed to unmarshal intercepted payload data")
-	}
+	require.IsType(t, typeOf, &unmarshaledPayload, "Could not unmarshal payload data")
 
 	combined, _ := interceptor.combineAndMarshalUnmarshaledPayloads(unmarshaledPayload)
 
-	typeOf_ := new([]byte)
-	if reflect.TypeOf(&combined) != reflect.TypeOf(typeOf_) {
-		t.Error("Failed to combined unmarshaled intercepted payload data")
-	}
+	require.IsType(t, []byte{}, combined, "Could not marshal combined payload data")
 
 	stream.CombinedPayloads = &combined
 	err := interceptor.SendCombined()
-	if err != nil {
-		t.Errorf("%v", err)
-	}
+	require.NoError(t, err, "Error sending combined payload data")
 
 	combinedByteArray = append(combinedByteArray, []byte(payloadThreeData))
 	unmarshaledPayload, err_ = interceptor.unmarshalPayloadData(combinedByteArray)
 	expectedError := status.Error(codes.InvalidArgument, "Failed to unmarshal data payload: invalid character '1' looking for beginning of object key string")
-	if err_.Error() != expectedError.Error() {
-		t.Error("Failed to unmarshal payload data")
-	}
+	require.EqualError(t, err_, expectedError.Error(), "Error unmarshaling payload data")
 
 	pluginOne := new(FakePlugin)
 	pluginTwo := new(FakePlugin)
@@ -203,30 +241,48 @@ func TestHybridPluginAgentInterceptorAndAidAttestation(t *testing.T) {
 	hybridPlugin := HybridPluginAgent{pluginList: pluginList, logger: hclog.Default(), interceptor: interceptorFake}
 
 	aidAttestation := hybridPlugin.AidAttestation(stream)
-	if aidAttestation != nil {
-		t.Error("AidAttestation of hybrid plugin fails")
-	}
+	require.NoError(t, aidAttestation, "AidAttestation of hybrid plugin fails")
+	// if aidAttestation != nil {
+	// 	t.Error("AidAttestation of hybrid plugin fails")
+	// }
 
 	interceptorFake.SetReturnError(true)
 
 	aidAttestation = hybridPlugin.AidAttestation(stream)
-	if aidAttestation == nil {
-		t.Error("AidAttestation of hybrid plugin fails")
-	}
+	require.Error(t, aidAttestation, "AidAttestation of hybrid plugin fails")
+	// if aidAttestation == nil {
+	// 	t.Error("AidAttestation of hybrid plugin fails")
+	// }
 
 	// ********** Log test
 
-	hybridPlugin.SetLogger(hclog.Default())
-	if hybridPlugin.logger != hclog.Default() {
-		t.Error("Could not set logger for hybrid plugin")
-	}
+	hybridPlugin.SetLogger(hclog.Default().Named("test_logger2"))
+	require.Equal(t, "test_logger2", hybridPlugin.logger.Name(), "Could not set hybrid plugin logger")
+
+	// if hybridPlugin.logger != hclog.Default() {
+	// 	t.Error("Could not set logger for hybrid plugin")
+	// }
 
 	expectedError = status.Error(codes.InvalidArgument, "Plugin initialization error")
 	hybridPlugin.initStatus = expectedError
 	aidAttestation = hybridPlugin.AidAttestation(stream)
-	if aidAttestation.Error() != expectedError.Error() {
-		t.Error("Plugin started without associated plugins configured")
+	require.EqualError(t, aidAttestation, expectedError.Error(), "AidAttestation of hybrid plugin fails")
+	// if aidAttestation.Error() != expectedError.Error() {
+	// 	t.Error("Plugin started without associated plugins configured")
+	// }
+
+	pluginOne = new(FakePlugin)
+	pluginTwo = new(FakePlugin)
+	pluginTwo.returnError = true
+	pluginList = []common.Types{
+		common.Types{PluginName: "k8s_psat", Plugin: pluginOne},
+		common.Types{PluginName: "aws_iid", Plugin: pluginTwo},
 	}
+	interceptorFake = new(InterceptorWrapper)
+	hybridPlugin = HybridPluginAgent{pluginList: pluginList, logger: hclog.Default(), interceptor: interceptorFake}
+
+	aidAttestation = hybridPlugin.AidAttestation(stream)
+	require.EqualError(t, aidAttestation, "rpc error: code = Internal desc = An error ocurred when during AidAttestation.", "Error calling plugin: %w", aidAttestation)
 }
 
 // ------------------------------------------------------------------------------------------------------------------------
@@ -240,6 +296,9 @@ func (f *FakePlugin) SetReturnError(state bool) {
 }
 
 func (f *FakePlugin) AidAttestation(stream nodeattestorv1.NodeAttestor_AidAttestationServer) error {
+	if f.returnError {
+		return status.Error(codes.InvalidArgument, "AidAttestation error")
+	}
 	return nil
 }
 
