@@ -34,7 +34,7 @@ type HybridPluginServer struct {
 	pluginList []common.Types
 	nodeattestorbase.Base
 	agentstorev1.UnimplementedAgentStoreServer
-	nodeattestorv1.UnimplementedNodeAttestorServer
+	nodeattestorv1.UnimplementedNodeAttestorServer // UnsafeNodeAttestorServer
 	configv1.UnsafeConfigServer
 
 	logger      hclog.Logger
@@ -82,6 +82,7 @@ func (p *HybridPluginServer) Attest(stream nodeattestorv1.NodeAttestor_AttestSer
 		return err
 	}
 
+	p.interceptor.ResetInterceptor()
 	p.interceptor.setCustomStream(stream)
 	p.interceptor.SetContext(stream.Context())
 	p.interceptor.SetLogger(p.logger)

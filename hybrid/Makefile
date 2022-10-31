@@ -37,7 +37,7 @@ test-integration:
 docker: $(DOCKER_TARGETS)
 $(DOCKER_TARGETS):
 	docker build -f ./dev/docker/$(target_software_type).Dockerfile $(PLATFORMS) --build-arg BINARY=$(target_binary) -t $(DOCKER_HUB)/$(target_binary_hyphens):$(VERSION) .
-	# docker push $(DOCKER_HUB)/$(target_binary_hyphens):$(VERSION)
+	docker push $(DOCKER_HUB)/$(target_binary_hyphens):$(VERSION)
 
 docker-build:
 	CGO_ENABLED=0 GOOS=$(TARGETOS) GOARCH=$(TARGETARCH) go build -ldflags="-s -w -extldflags -static" -o ${BINARY} cmd/${BINARY}/main.go
@@ -45,6 +45,7 @@ docker-build:
 deploy-spire-eks:
 	kubectl delete --all daemonsets.app --namespace=spire
 	kubectl delete --all statefulset.app --namespace=spire
+	kubectl delete --ignore-not-found namespace spire
 	envsubst < $(EKS_DIR)/server.yaml | kubectl apply -f -
 	envsubst < $(EKS_DIR)/agent.yaml | kubectl apply -f -
 
