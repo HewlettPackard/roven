@@ -1,9 +1,8 @@
 package hybrid_agent
 
 import (
-	"bytes"
 	"context"
-	"errors"
+	"encoding/json"
 	"fmt"
 	"testing"
 
@@ -65,7 +64,6 @@ aws_iid {
 var pluginsStringEmptyData = `plugins {}`
 var payloadOneData = `{"cluster":"hybrid-node-attestor_fake","token":"part1.part2.part3-part4-part5--part6-part7"}`
 var payloadTwoData = `{"document":"{\n  \"accountId\" : \"123456789_TEST\",\n  \"architecture\" : \"x86_64\",\n  \"availabilityZone\" : \"us-east-2a\",\n  \"billingProducts\" : null,\n  \"devpayProductCodes\" : null,\n  \"marketplaceProductCodes\" : null,\n  \"imageId\" : \"ami-010203040506\",\n  \"instanceId\" : \"i-010203040506\",\n  \"instanceType\" : \"m5.large\",\n  \"kernelId\" : null,\n  \"pendingTime\" : \"2022-09-22T03:22:21Z\",\n  \"privateIp\" : \"192.168.77.116\",\n  \"ramdiskId\" : null,\n  \"region\" : \"us-east-2\",\n  \"version\" : \"2017-09-30\"\n}","signature":"eO4+90PuN8bZaIJjpBe1/mAzPhvSrrhLATwPFaOPzK5ZSUpsbVOuK2tXjMYkx+ora7mcaL0G45li\nbZLGUIee+DF/YZ8/5RuNf1Z8yn+5e2AqLvNhIsF5IOVZWk8yDvl/jBJCcW8GaRblldWdMoDiC2OA\nqVyRjyJCXUySNu0JADE="}`
-var payloadThreeData = `{1,2,3,4,}`
 
 // ------------------------------------------------------------------------------------------------------------------------
 
@@ -168,9 +166,9 @@ func TestHybridPluginConfiguration(t *testing.T) {
 	require.EqualError(t, errConfig, "rpc error: code = Internal desc = Error configuring one of the supplied plugins.", "Error configuring plugin: %w", errConfig)
 }
 
-func TestHybridPluginAgentInterceptorAndAidAttestation(t *testing.T) {
-	combinedPayloads := []byte("")
-	stream := StreamMock{CombinedPayloads: &combinedPayloads}
+func TestHybridPluginAgentInterceptor(t *testing.T) {
+	emptyPayload := []byte("")
+	stream := StreamMock{Payload: &emptyPayload}
 	interceptor := new(HybridPluginAgentInterceptor)
 
 	interceptor.setCustomStream(&stream)
@@ -184,14 +182,13 @@ func TestHybridPluginAgentInterceptorAndAidAttestation(t *testing.T) {
 	interceptor.SetLogger(hclog.Default().Named("test_logger"))
 	require.Equal(t, "test_logger", interceptor.logger.Name(), "Could not set interceptor logger")
 
-	payloadEmpty := interceptor.payload
-
 	payloadOne := nodeattestorv1.PayloadOrChallengeResponse{
 		Data: &nodeattestorv1.PayloadOrChallengeResponse_Payload{
 			Payload: []byte(payloadOneData),
 		},
 	}
 	interceptor.Send(&payloadOne)
+	require.Equal(t, []byte(payloadOneData), interceptor.payload, "Could not set payload on interceptor")
 
 	payloadTwo := nodeattestorv1.PayloadOrChallengeResponse{
 		Data: &nodeattestorv1.PayloadOrChallengeResponse_Payload{
@@ -199,39 +196,43 @@ func TestHybridPluginAgentInterceptorAndAidAttestation(t *testing.T) {
 		},
 	}
 	interceptor.Send(&payloadTwo)
+	require.Equal(t, []byte(payloadTwoData), interceptor.payload, "Could not replace payload on interceptor")
 
-	if payloadEmpty == nil {
-		if len(interceptor.payload) > 0 && bytes.Compare(interceptor.payload[0], payloadOne.GetPayload()) != 0 {
-			t.Error("Could not intercept Payload message")
-		}
-	}
+	interceptor.payload = nil
+	interceptorOne := interceptor.SpawnInterceptor()
+	interceptorOne.SetPluginName("test_pluginOne")
+	interceptorOne.Send(&payloadOne)
 
-	var combinedByteArray [][]byte
-	combinedByteArray = append(combinedByteArray, []byte(payloadOneData))
-	combinedByteArray = append(combinedByteArray, []byte(payloadTwoData))
-	unmarshaledPayload, err_ := interceptor.unmarshalPayloadData(combinedByteArray)
+	interceptorTwo := interceptor.SpawnInterceptor()
+	interceptorTwo.SetPluginName("test_pluginTwo")
+	interceptorTwo.Send(&payloadTwo)
+	var messageList common.PluginMessageList = common.PluginMessageList{}
 
-	typeOf := new([]map[string]interface{})
-	require.IsType(t, typeOf, &unmarshaledPayload, "Could not unmarshal payload data")
+	message1 := interceptorOne.GetMessage()
+	require.Equal(t, []byte(payloadOneData), message1.PluginData, "Could not get message from interceptor")
+	require.Equal(t, "test_pluginOne", message1.PluginName, "Could not get plugin name from interceptor")
+	message2 := interceptorTwo.GetMessage()
+	require.Equal(t, []byte(payloadTwoData), message2.PluginData, "Could not get message from interceptor")
+	require.Equal(t, "test_pluginTwo", message2.PluginName, "Could not get plugin name from interceptor")
+	messageList.Messages = append(messageList.Messages, message1)
+	messageList.Messages = append(messageList.Messages, message2)
+	interceptor.SendCombined(messageList)
 
-	combined, _ := interceptor.combineAndMarshalUnmarshaledPayloads(unmarshaledPayload)
+	jsonMessage, err := json.Marshal(messageList)
+	require.NoError(t, err, "Error marshalling message list: %w", err)
+	require.Equal(t, &jsonMessage, stream.Payload, "Could not send combined message list to stream")
+}
 
-	require.IsType(t, []byte{}, combined, "Could not marshal combined payload data")
+func TestHybridPluginAgentAidAttestation(t *testing.T) {
 
-	stream.CombinedPayloads = &combined
-	err := interceptor.SendCombined()
-	require.NoError(t, err, "Error sending combined payload data")
-
-	combinedByteArray = append(combinedByteArray, []byte(payloadThreeData))
-	unmarshaledPayload, err_ = interceptor.unmarshalPayloadData(combinedByteArray)
-	expectedError := status.Error(codes.InvalidArgument, "Failed to unmarshal data payload: invalid character '1' looking for beginning of object key string")
-	require.EqualError(t, err_, expectedError.Error(), "Error unmarshaling payload data")
+	emptyPayload := []byte("")
+	stream := StreamMock{Payload: &emptyPayload}
 
 	pluginOne := new(FakePlugin)
 	pluginTwo := new(FakePlugin)
 	pluginList := []common.Types{
-		common.Types{PluginName: "k8s_psat", Plugin: pluginOne},
-		common.Types{PluginName: "aws_iid", Plugin: pluginTwo},
+		{PluginName: "k8s_psat", Plugin: pluginOne},
+		{PluginName: "aws_iid", Plugin: pluginTwo},
 	}
 	interceptorFake := new(InterceptorWrapper)
 	hybridPlugin := HybridPluginAgent{pluginList: pluginList, logger: hclog.Default(), interceptor: interceptorFake}
@@ -246,7 +247,7 @@ func TestHybridPluginAgentInterceptorAndAidAttestation(t *testing.T) {
 	hybridPlugin.SetLogger(hclog.Default().Named("test_logger2"))
 	require.Equal(t, "test_logger2", hybridPlugin.logger.Name(), "Could not set hybrid plugin logger")
 
-	expectedError = status.Error(codes.InvalidArgument, "Plugin initialization error")
+	expectedError := status.Error(codes.InvalidArgument, "Plugin initialization error")
 	hybridPlugin.initStatus = expectedError
 	aidAttestation = hybridPlugin.AidAttestation(stream)
 	require.EqualError(t, aidAttestation, expectedError.Error(), "AidAttestation of hybrid plugin fails")
@@ -255,8 +256,8 @@ func TestHybridPluginAgentInterceptorAndAidAttestation(t *testing.T) {
 	pluginTwo = new(FakePlugin)
 	pluginTwo.returnError = true
 	pluginList = []common.Types{
-		common.Types{PluginName: "k8s_psat", Plugin: pluginOne},
-		common.Types{PluginName: "aws_iid", Plugin: pluginTwo},
+		{PluginName: "k8s_psat", Plugin: pluginOne},
+		{PluginName: "aws_iid", Plugin: pluginTwo},
 	}
 	interceptorFake = new(InterceptorWrapper)
 	hybridPlugin = HybridPluginAgent{pluginList: pluginList, logger: hclog.Default(), interceptor: interceptorFake}
@@ -295,7 +296,7 @@ func (f *FakePlugin) Configure(ctx context.Context, req *configv1.ConfigureReque
 
 type StreamMock struct {
 	grpc.ServerStream
-	CombinedPayloads *[]byte
+	Payload *[]byte
 }
 
 func (s StreamMock) Recv() (*nodeattestorv1.Challenge, error) {
@@ -304,9 +305,8 @@ func (s StreamMock) Recv() (*nodeattestorv1.Challenge, error) {
 }
 
 func (s StreamMock) Send(challenge *nodeattestorv1.PayloadOrChallengeResponse) error {
-	if bytes.Compare(*s.CombinedPayloads, challenge.GetPayload()) != 0 {
-		return errors.New("Could not send intercepted payloads")
-	}
+	payload := challenge.GetPayload()
+	*(s.Payload) = payload
 	return nil
 }
 
@@ -328,6 +328,8 @@ func (pw *PluginWrapper) Context() context.Context {
 
 type InterceptorWrapper struct {
 	returnError bool
+	message     common.PluginMessage
+	name        string
 	nodeattestorv1.NodeAttestor_AidAttestationServer
 }
 
@@ -359,7 +361,7 @@ func (iw *InterceptorWrapper) SetLogger(logger hclog.Logger) {
 
 }
 
-func (iw *InterceptorWrapper) SendCombined() error {
+func (iw *InterceptorWrapper) SendCombined(common.PluginMessageList) error {
 	if iw.returnError {
 		return status.Error(codes.Internal, "Test Error")
 	}
@@ -367,10 +369,18 @@ func (iw *InterceptorWrapper) SendCombined() error {
 	return nil
 }
 
-func (iw *InterceptorWrapper) combineAndMarshalUnmarshaledPayloads(data []map[string]interface{}) ([]byte, error) {
-	return nil, nil
+func (iw *InterceptorWrapper) GetMessage() common.PluginMessage {
+	return iw.message
 }
 
-func (iw *InterceptorWrapper) unmarshalPayloadData(payloadData [][]byte) ([]map[string]interface{}, error) {
-	return nil, nil
+func (iw *InterceptorWrapper) SetPluginName(name string) {
+	iw.name = name
+}
+
+func (iw *InterceptorWrapper) SpawnInterceptor() AgentInterceptorInterface {
+	return &InterceptorWrapper{
+		returnError: iw.returnError,
+		message:     iw.message,
+		name:        iw.name,
+	}
 }

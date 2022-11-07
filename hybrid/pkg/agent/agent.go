@@ -50,16 +50,27 @@ func (p *HybridPluginAgent) AidAttestation(stream nodeattestorv1.NodeAttestor_Ai
 	p.interceptor.SetContext(stream.Context())
 	p.interceptor.SetLogger(p.logger)
 
+	interceptors := []AgentInterceptorInterface{}
+
 	for i := 0; i < len(p.pluginList); i++ {
+		var newInterceptor AgentInterceptorInterface = p.interceptor.SpawnInterceptor()
+		newInterceptor.SetPluginName(p.pluginList[i].PluginName)
+		interceptors = append(interceptors, newInterceptor)
+
 		elem := reflect.ValueOf(p.pluginList[i].Plugin)
-		result := elem.MethodByName("AidAttestation").Call([]reflect.Value{reflect.ValueOf(p.interceptor)})
+		result := elem.MethodByName("AidAttestation").Call([]reflect.Value{reflect.ValueOf(newInterceptor)})
 		err := result[0].Interface()
 		if err != nil {
 			return status.Errorf(codes.Internal, "An error ocurred when during AidAttestation.")
 		}
 	}
 
-	return p.interceptor.SendCombined()
+	combinedMessage := common.PluginMessageList{}
+	for i := 0; i < len(interceptors); i++ {
+		combinedMessage.Messages = append(combinedMessage.Messages, interceptors[i].GetMessage())
+	}
+
+	return p.interceptor.SendCombined(combinedMessage)
 }
 
 func (p *HybridPluginAgent) Configure(ctx context.Context, req *configv1.ConfigureRequest) (*configv1.ConfigureResponse, error) {

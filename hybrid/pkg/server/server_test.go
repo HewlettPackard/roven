@@ -2,12 +2,12 @@ package hybrid_server
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"testing"
 
 	hclog "github.com/hashicorp/go-hclog"
-	"github.com/hewlettpackard/hybrid/pkg/common"
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
 	agentstorev1 "github.com/spiffe/spire-plugin-sdk/proto/spire/hostservice/server/agentstore/v1"
 	nodeattestorv1 "github.com/spiffe/spire-plugin-sdk/proto/spire/plugin/server/nodeattestor/v1"
@@ -18,6 +18,7 @@ import (
 	"github.com/spiffe/spire/pkg/server/plugin/nodeattestor/gcpiit"
 	"github.com/spiffe/spire/pkg/server/plugin/nodeattestor/k8spsat"
 
+	"github.com/hewlettpackard/hybrid/pkg/common"
 	"github.com/spiffe/spire/test/fakes/fakeagentstore"
 	"github.com/spiffe/spire/test/plugintest"
 	require "github.com/stretchr/testify/require"
@@ -161,6 +162,29 @@ func TestHybridPluginServerInterceptor(t *testing.T) {
 	require.IsType(t, &StreamMock{}, interceptor.stream, "Could not set custom stream")
 	require.Equal(t, &stream, interceptor.Stream(), "Could not get custom stream")
 
+	interceptor.SetSpiffeID("spiffe://example.org/spire/agent/test")
+	require.Equal(t, "spiffe://example.org/spire/agent/test", interceptor.SpiffeID(), "Could not set spiffe id")
+
+	var req nodeattestorv1.AttestRequest
+	req.Request = &nodeattestorv1.AttestRequest_ChallengeResponse{
+		ChallengeResponse: []byte("testchallenge"),
+	}
+	interceptor.SetReq(&req)
+	gotReq, errConfig := interceptor.Recv()
+	require.NoError(t, errConfig, "Error receiving request: %w", errConfig)
+	require.Equal(t, []byte("testchallenge"), gotReq.GetChallengeResponse(), "Could not set interceptor request")
+
+	var newInterceptor ServerInterceptorInterface = interceptor.SpawnInterceptor()
+	require.IsType(t, &HybridPluginServerInterceptor{}, newInterceptor, "Spawned interceptor is not of type HybridPluginServerInterceptor")
+	require.Equal(t, interceptor.Context(), newInterceptor.Context(), "Spawned interceptor context is not equal to original interceptor context")
+	require.Equal(t, interceptor.logger, newInterceptor.(*HybridPluginServerInterceptor).logger, "Spawned interceptor logger is not equal to original interceptor logger")
+	require.Equal(t, interceptor.SpiffeID(), newInterceptor.SpiffeID(), "Spawned interceptor spiffe id is not equal to original interceptor spiffe id")
+	require.Equal(t, interceptor.Stream(), newInterceptor.Stream(), "Spawned interceptor stream is not equal to original interceptor stream")
+	require.Equal(t, interceptor.req, newInterceptor.(*HybridPluginServerInterceptor).req, "Spawned interceptor request is not equal to original interceptor request")
+	require.Equal(t, interceptor.Response, newInterceptor.(*HybridPluginServerInterceptor).Response, "Spawned interceptor response is not equal to original interceptor response")
+	require.Equal(t, interceptor.combinedSelectors, newInterceptor.CombinedSelectors(), "Spawned interceptor combined selectors is not equal to original interceptor combined selectors")
+	require.Equal(t, interceptor.canReattest, newInterceptor.(*HybridPluginServerInterceptor).canReattest, "Spawned interceptor canReattest is not equal to original interceptor canReattest")
+
 	interceptor.combinedSelectors = []string{}
 	interceptor.spiffeID = ""
 	err := interceptor.Send(&nodeattestorv1.AttestResponse{
@@ -190,17 +214,8 @@ func TestHybridPluginServerInterceptor(t *testing.T) {
 	require.NoError(t, err, "Error sending response: %w", err)
 	require.Equal(t, "spiffe://example.org/spire/agent/k8s_psat/test", interceptor.SpiffeID(), "SpiffeID was overwritten on second response: %q", interceptor.SpiffeID())
 	require.Equal(t, []string{"test", "test2", "test3", "test4"}, interceptor.CombinedSelectors(), "Selector values not appended properly on second response: %q", interceptor.CombinedSelectors())
-
 	require.Equal(t, []bool{false, true}, interceptor.CanReattest(), "CanReattest was not set properly on second response: %t", interceptor.CanReattest())
 
-	var req nodeattestorv1.AttestRequest
-	req.Request = &nodeattestorv1.AttestRequest_ChallengeResponse{
-		ChallengeResponse: []byte("testchallenge"),
-	}
-	interceptor.SetReq(&req)
-	gotReq, errConfig := interceptor.Recv()
-	require.NoError(t, errConfig, "Error receiving request: %w", errConfig)
-	require.Equal(t, []byte("testchallenge"), gotReq.GetChallengeResponse(), "Could not set interceptor request")
 }
 
 func TestHybridPluginServerFuncsAndAttest(t *testing.T) {
@@ -234,20 +249,26 @@ func TestHybridPluginServerFuncsAndAttest(t *testing.T) {
 		{PluginName: "aws_iid", Plugin: pluginTwo},
 	}
 
+	interceptorFake.canReattest = []bool{true, false}
 	hybridPlugin = HybridPluginServer{pluginList: pluginList, logger: hclog.Default(), interceptor: interceptorFake}
 
-	combinedPayloads := []byte("a")
+	combinedPayloads, err := json.Marshal(common.PluginMessageList{
+		Messages: []common.PluginMessage{
+			{
+				PluginName: "k8s_psat",
+				PluginData: []byte("a"),
+			},
+			{
+				PluginName: "aws_iid",
+				PluginData: []byte("b"),
+			},
+		}})
+	require.NoError(t, err, "Parse of sample messages failed: %v", err)
+
 	stream := StreamMock{CombinedPayloads: &combinedPayloads}
 	stream.returnError = nil
-	stream.Response = &nodeattestorv1.AttestResponse{
-		Response: &nodeattestorv1.AttestResponse_AgentAttributes{
-			AgentAttributes: &nodeattestorv1.AgentAttributes{
-				SelectorValues: []string{"test", "test2"},
-				SpiffeId:       "spiffe://example.org/spire/agent/k8s_psat/test",
-			},
-		},
-	}
-	err := hybridPlugin.Attest(stream)
+	stream.Response = &nodeattestorv1.AttestResponse{}
+	err = hybridPlugin.Attest(stream)
 	require.NoError(t, err, "Attest of hybrid plugin failed: %v", err)
 }
 
@@ -267,6 +288,25 @@ func TestHybridPluginErrors(t *testing.T) {
 	combinedPayloads := []byte("a")
 	stream := StreamMock{CombinedPayloads: &combinedPayloads}
 	stream.returnError = nil
+
+	err := hybridPlugin.Attest(stream)
+	require.EqualError(t, err, "rpc error: code = InvalidArgument desc = unable to unmarshal payload: invalid character 'a' looking for beginning of value")
+
+	combinedPayloads, err = json.Marshal(common.PluginMessageList{
+		Messages: []common.PluginMessage{
+			{
+				PluginName: "k8s_psat",
+				PluginData: []byte("a"),
+			},
+			{
+				PluginName: "aws_iid",
+				PluginData: []byte("b"),
+			},
+		}})
+	require.NoError(t, err, "Error marshalling combined payloads: %w", err)
+
+	stream = StreamMock{CombinedPayloads: &combinedPayloads}
+	stream.returnError = nil
 	stream.Response = &nodeattestorv1.AttestResponse{
 		Response: &nodeattestorv1.AttestResponse_AgentAttributes{
 			AgentAttributes: &nodeattestorv1.AgentAttributes{
@@ -275,13 +315,44 @@ func TestHybridPluginErrors(t *testing.T) {
 			},
 		},
 	}
-	err := hybridPlugin.Attest(stream)
-	require.Error(t, err, "Attest of hybrid plugin should fail")
+	err = hybridPlugin.Attest(stream)
+	require.EqualError(t, err, "rpc error: code = Internal desc = Plugin initialization error")
+
+	combinedPayloads, err = json.Marshal(common.PluginMessageList{
+		Messages: []common.PluginMessage{
+			{
+				PluginName: "k8s_psaat",
+				PluginData: []byte("a"),
+			},
+			{
+				PluginName: "aws_iid",
+				PluginData: []byte("b"),
+			},
+		}})
+	require.NoError(t, err, "Error marshalling combined payloads: %w", err)
+
+	stream = StreamMock{CombinedPayloads: &combinedPayloads}
+	stream.returnError = nil
+	stream.Response = &nodeattestorv1.AttestResponse{
+		Response: &nodeattestorv1.AttestResponse_AgentAttributes{
+			AgentAttributes: &nodeattestorv1.AgentAttributes{
+				SelectorValues: []string{"test", "test2"},
+				SpiffeId:       "spiffe://example.org/spire/agent/k8s_psat/test",
+			},
+		},
+	}
+	err = hybridPlugin.Attest(stream)
+	require.EqualError(t, err, "rpc error: code = InvalidArgument desc = plugin k8s_psaat not found")
+
+	challengeStream := ChallengeStreamMock{}
+	challengeStream.returnError = nil
+	err = hybridPlugin.Attest(challengeStream)
+	require.EqualError(t, err, "rpc error: code = InvalidArgument desc = request payload is required")
 
 	stream.returnError = status.Error(codes.InvalidArgument, "Plugin atestation error")
 
 	err = hybridPlugin.Attest(stream)
-	require.Error(t, err, "Attest of hybrid plugin should fail.", err)
+	require.EqualError(t, err, "rpc error: code = InvalidArgument desc = Plugin atestation error")
 
 	stream.returnError = status.Error(codes.InvalidArgument, "Error sending response")
 	err = hybridPlugin.Attest(stream)
@@ -315,7 +386,7 @@ func TestSendResponse(t *testing.T) {
 	}
 
 	plugin.pluginList = pluginList
-	interceptor.canReattest = []bool{true, false}
+	interceptor.canReattest = []bool{}
 	combinedPayloads := []byte("a")
 	stream := StreamMock{CombinedPayloads: &combinedPayloads}
 	stream.returnError = nil
@@ -328,19 +399,26 @@ func TestSendResponse(t *testing.T) {
 		},
 	}
 	interceptor.setCustomStream(&stream)
-	interceptor.spiffeid = "spiffe://example.org/spire/agent/k8s_psat/test"
-
-	err := plugin.SendResponse()
+	interceptor.spiffeid = ""
+	interceptorList := []ServerInterceptorInterface{}
+	interceptorList = append(interceptorList, interceptor.SpawnInterceptor())
+	interceptorList = append(interceptorList, interceptor.SpawnInterceptor())
+	interceptorList[0].(*InterceptorWrapper).canReattest = []bool{true}
+	interceptorList[0].(*InterceptorWrapper).spiffeid = "spiffe://example.org/spire/agent/k8s_psat/test"
+	interceptorList[1].(*InterceptorWrapper).canReattest = []bool{false}
+	interceptorList[1].(*InterceptorWrapper).spiffeid = "spiffe://example.org/spire/agent/aws_iid/test"
+	err := plugin.SendResponse(interceptorList)
 	require.NoError(t, err, "SendResponse failed: %v", err)
+	require.Equal(t, "spiffe://example.org/spire/agent/k8s_psat/test", interceptor.spiffeid, "Main interceptor spiffeid was not set")
 
 	fakeStore.SetAgentInfo(&agentstorev1.AgentInfo{
-		AgentId: "spiffe://example.org/spire/agent/k8s_psat/test",
+		AgentId: "spiffe://example.org/spire/agent/aws_iid/test",
 	})
-	err = plugin.SendResponse()
-	require.Error(t, err, "SendResponse failed: %v", err)
+	err = plugin.SendResponse(interceptorList)
+	require.EqualError(t, err, "rpc error: code = PermissionDenied desc = attestation data has already been used to attest an agent")
 
-	fakeStore.SetAgentErr("spiffe://example.org/spire/agent/k8s_psat/test", status.Error(codes.InvalidArgument, "Error retrieving agentInfo"))
-	err = plugin.SendResponse()
+	fakeStore.SetAgentErr("spiffe://example.org/spire/agent/aws_iid/test", status.Error(codes.InvalidArgument, "Error retrieving agentInfo"))
+	err = plugin.SendResponse(interceptorList)
 	require.EqualError(t, err, "rpc error: code = InvalidArgument desc = unable to get agent info: Error retrieving agentInfo", "SendResponse failed unexpectedly: %v", err)
 
 }
@@ -438,6 +516,32 @@ func (s StreamMock) Context() context.Context {
 	return context.Background()
 }
 
+type ChallengeStreamMock struct {
+	grpc.ServerStream
+	CombinedPayloads *[]byte
+	Response         *nodeattestorv1.AttestResponse
+
+	returnError error
+}
+
+func (s ChallengeStreamMock) Recv() (*nodeattestorv1.AttestRequest, error) {
+	if s.returnError != nil {
+		return nil, s.returnError
+	}
+	request := nodeattestorv1.AttestRequest{Request: &nodeattestorv1.AttestRequest_ChallengeResponse{}}
+	return &request, nil
+}
+
+func (s ChallengeStreamMock) Send(challenge *nodeattestorv1.AttestResponse) error {
+	*s.Response = *challenge
+
+	return s.returnError
+}
+
+func (s ChallengeStreamMock) Context() context.Context {
+	return context.Background()
+}
+
 // ----------------------------------------------------------------------------
 
 type PluginWrapper struct {
@@ -518,4 +622,17 @@ func (iw *InterceptorWrapper) Stream() nodeattestorv1.NodeAttestor_AttestServer 
 
 func (iw *InterceptorWrapper) ResetInterceptor() {
 
+}
+
+func (iw *InterceptorWrapper) SetSpiffeID(spiffeID string) {
+	iw.spiffeid = spiffeID
+}
+
+func (iw *InterceptorWrapper) SpawnInterceptor() ServerInterceptorInterface {
+	return &InterceptorWrapper{
+		returnError: iw.returnError,
+		stream:      iw.stream,
+		canReattest: iw.canReattest,
+		spiffeid:    iw.spiffeid,
+	}
 }

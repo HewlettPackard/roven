@@ -3,6 +3,7 @@ package hybrid_server
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"reflect"
 	"strings"
@@ -88,24 +89,56 @@ func (p *HybridPluginServer) Attest(stream nodeattestorv1.NodeAttestor_AttestSer
 	p.interceptor.SetLogger(p.logger)
 	p.interceptor.SetReq(req)
 
-	for i := 0; i < len(p.pluginList); i++ {
-		elem := reflect.ValueOf(p.pluginList[i].Plugin)
-		elem.MethodByName("SetLogger").Call([]reflect.Value{reflect.ValueOf(p.logger)})
-		result := elem.MethodByName("Attest").Call([]reflect.Value{reflect.ValueOf(p.interceptor)})
-		if result[0].Interface() != nil {
-			callError, _ := status.FromError(result[0].Interface().(error))
-			return status.Errorf(codes.Internal, callError.Message())
+	payloadRequest, ok := req.Request.(*nodeattestorv1.AttestRequest_Payload)
+	if !ok {
+		return status.Errorf(codes.InvalidArgument, "request payload is required")
+	}
+
+	var messageList common.PluginMessageList = common.PluginMessageList{}
+	if err := json.Unmarshal(payloadRequest.Payload, &messageList); err != nil {
+		return status.Errorf(codes.InvalidArgument, "unable to unmarshal payload: %v", err)
+	}
+	interceptors := []ServerInterceptorInterface{}
+	for _, message := range messageList.Messages {
+		name := message.PluginName
+		processed := false
+		newReq := &nodeattestorv1.AttestRequest{
+			Request: &nodeattestorv1.AttestRequest_Payload{
+				Payload: message.PluginData,
+			},
+		}
+
+		var newInterceptor ServerInterceptorInterface = p.interceptor.SpawnInterceptor()
+		newInterceptor.SetReq(newReq)
+		interceptors = append(interceptors, newInterceptor)
+
+		for _, plugin := range p.pluginList {
+			if plugin.PluginName == name {
+				elem := reflect.ValueOf(plugin.Plugin)
+				elem.MethodByName("SetLogger").Call([]reflect.Value{reflect.ValueOf(p.logger)})
+				result := elem.MethodByName("Attest").Call([]reflect.Value{reflect.ValueOf(newInterceptor)})
+				if result[0].Interface() != nil {
+					callError, _ := status.FromError(result[0].Interface().(error))
+					return status.Errorf(codes.Internal, callError.Message())
+				}
+				processed = true
+				break
+			}
+		}
+		if !processed {
+			return status.Errorf(codes.InvalidArgument, "plugin %s not found", name)
 		}
 	}
 
-	return p.SendResponse()
+	return p.SendResponse(interceptors)
 }
 
-func (p *HybridPluginServer) SendResponse() error {
+func (p *HybridPluginServer) SendResponse(interceptors []ServerInterceptorInterface) error {
+	selectors := []string{}
 	canReattest := true
-	for _, n := range p.interceptor.CanReattest() {
-		if !n {
-			attested, err := agentstore.IsAttested(context.Background(), p.store, p.interceptor.SpiffeID())
+	for _, interceptor := range interceptors {
+		if !interceptor.CanReattest()[0] {
+			attested, err := agentstore.IsAttested(context.Background(), p.store, interceptor.SpiffeID())
 			canReattest = false
 			switch {
 			case err != nil:
@@ -115,6 +148,10 @@ func (p *HybridPluginServer) SendResponse() error {
 			default:
 			}
 		}
+		if len(p.interceptor.SpiffeID()) == 0 {
+			p.interceptor.SetSpiffeID(interceptor.SpiffeID())
+		}
+		selectors = append(selectors, interceptor.CombinedSelectors()...)
 	}
 
 	return p.interceptor.Stream().Send(&nodeattestorv1.AttestResponse{
@@ -122,7 +159,7 @@ func (p *HybridPluginServer) SendResponse() error {
 			AgentAttributes: &nodeattestorv1.AgentAttributes{
 				CanReattest:    canReattest,
 				SpiffeId:       p.interceptor.SpiffeID(),
-				SelectorValues: p.interceptor.CombinedSelectors(),
+				SelectorValues: selectors,
 			},
 		},
 	})

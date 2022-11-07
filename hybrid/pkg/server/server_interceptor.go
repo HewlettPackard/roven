@@ -17,9 +17,11 @@ type ServerInterceptorInterface interface {
 	SetReq(req *nodeattestorv1.AttestRequest)
 	CanReattest() []bool
 	SpiffeID() string
+	SetSpiffeID(spiffeID string)
 	CombinedSelectors() []string
 	Stream() nodeattestorv1.NodeAttestor_AttestServer
 	ResetInterceptor()
+	SpawnInterceptor() ServerInterceptorInterface
 }
 
 type HybridPluginServerInterceptor struct {
@@ -43,6 +45,19 @@ func (m *HybridPluginServerInterceptor) ResetInterceptor() {
 	m.combinedSelectors = nil
 	m.spiffeID = ""
 	m.canReattest = nil
+}
+
+func (m *HybridPluginServerInterceptor) SpawnInterceptor() ServerInterceptorInterface {
+	return &HybridPluginServerInterceptor{
+		ctx:               m.ctx,
+		stream:            m.stream,
+		logger:            m.logger,
+		req:               m.req,
+		Response:          m.Response,
+		combinedSelectors: m.combinedSelectors,
+		spiffeID:          m.spiffeID,
+		canReattest:       m.canReattest,
+	}
 }
 
 func (m *HybridPluginServerInterceptor) Recv() (*nodeattestorv1.AttestRequest, error) {
@@ -98,4 +113,8 @@ func (m *HybridPluginServerInterceptor) CombinedSelectors() []string {
 
 func (m *HybridPluginServerInterceptor) Stream() nodeattestorv1.NodeAttestor_AttestServer {
 	return m.stream
+}
+
+func (m *HybridPluginServerInterceptor) SetSpiffeID(spiffeID string) {
+	m.spiffeID = spiffeID
 }
