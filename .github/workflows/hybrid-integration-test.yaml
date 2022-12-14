@@ -1,0 +1,72 @@
+## This code is to be runned when the PR is fully merged. We are not able to merge with it running because the fork doesn't share the github action variables with the main repo.
+## After merging, uncomment this code and run
+
+# name: integration test
+
+# on:
+#   workflow_dispatch:
+#   pull_request:
+#     paths:
+#     - 'hybrid/**'
+# jobs:
+#   build:
+#     runs-on: ubuntu-latest
+
+#     steps:
+#     - name: Checkout Repository
+#       uses: actions/checkout@2541b1294d2704b0964813337f33b291d3f8596b # v3.0.2
+
+#     - name: Setup Go
+#       uses: actions/setup-go@b22fbbc2921299758641fab08929b4ac52b32923 # v3.2.0
+#       with:
+#         go-version: '>=1.17.0'
+
+#     - name: Configure AWS credentials
+#       uses: aws-actions/configure-aws-credentials@v1
+#       with:
+#         aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+#         aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+#         aws-region: ${{ secrets.AWS_REGION }}
+
+#     - name: Login to Amazon ECR Public
+#       id: login-ecr-public
+#       uses: aws-actions/amazon-ecr-login@v1
+#       with:
+#         registry-type: public
+
+#     - name: Install eksctl
+#       run: |
+#         curl --silent --location "https://github.com/weaveworks/eksctl/releases/latest/download/eksctl_$(uname -s)_amd64.tar.gz" | tar xz -C /tmp && mv /tmp/eksctl /usr/local/bin
+
+#     - name: Check cluster exists
+#       run: |
+#         echo "CLUSTER=$(eksctl get cluster --name ${{ secrets.AWS_TEST_CLUSTER }} | grep -c ${{ secrets.AWS_TEST_CLUSTER }} )" >> $GITHUB_ENV
+
+#     - name: Create cluster
+#       env :
+#         AWS_TEST_CLUSTER: ${{ secrets.AWS_TEST_CLUSTER }}
+#       if: "${{ env.CLUSTER == 0 }}"
+#       run: |
+#         eksctl create cluster --name ${{ secrets.AWS_TEST_CLUSTER }} --region ${{ secrets.AWS_REGION }} --zones ${{ secrets.AWS_ZONES }} --version 1.22 --node-type m5.large --nodes-min 1 --nodes-max 1 --nodes 1
+
+#     - name: Update context
+#       run: |
+#         aws eks update-kubeconfig --region ${{ secrets.AWS_REGION }} --name ${{ secrets.AWS_TEST_CLUSTER }}
+
+#     - name: Set Context
+#       run: |
+#         kubectl config use-context arn:aws:eks:${{ secrets.AWS_REGION }}:${{ secrets.AWS_ACCOUNT_ID }}:cluster/${{ secrets.AWS_TEST_CLUSTER }}
+
+#     - name: Run integration test
+#       env:
+#         DOCKER_HUB: ${{ secrets.DOCKER_HUB }}
+#         AWS_TEST_CLUSTER: ${{ secrets.AWS_TEST_CLUSTER }}
+#       run: |
+#         ./hybrid/test/integration/test.sh
+
+#     - name: Delete cluster
+#       run: |
+#         eksctl get nodegroup --cluster ${{ secrets.AWS_TEST_CLUSTER }} | awk 'NR==2 {first = $2} END {print first}' | while read a ; do eksctl delete nodegroup --cluster ${{ secrets.AWS_TEST_CLUSTER }} --region ${{ secrets.AWS_REGION }} --name $a;done
+#         aws cloudformation list-stacks --stack-status-filter CREATE_COMPLETE --region ${{ secrets.AWS_REGION }} | grep StackName | grep ${{ secrets.AWS_TEST_CLUSTER }} | grep nodegroup | sed 's/"StackName": "//' | sed 's/",//' | while read a ; do aws cloudformation delete-stack --stack-name $a;done
+#         aws cloudformation list-stacks --stack-status-filter CREATE_COMPLETE --region ${{ secrets.AWS_REGION }} | grep StackName | grep ${{ secrets.AWS_TEST_CLUSTER }} | grep cluster | sed 's/"StackName": "//' | sed 's/",//' | while read a ; do aws cloudformation delete-stack --stack-name $a;done
+#         eksctl delete cluster --name ${{ secrets.AWS_TEST_CLUSTER }} --region ${{ secrets.AWS_REGION }}

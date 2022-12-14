@@ -1,0 +1,40 @@
+#!/bin/bash
+
+log-debug() {
+    echo "${norm}$(timestamp) $*"
+}
+
+fail-now() {
+    echo "${red}$(timestamp) $*${norm}"
+    exit 1
+}
+
+timestamp() {
+    date -u "+[%Y-%m-%dT%H:%M:%SZ]"
+}
+
+create-ns() {
+    kind_namespace=$1
+    log-debug "Creating namespace..."
+    kubectl create namespace ${kind_namespace}
+}
+
+delete-ns() {
+	log-debug "Deleting namespace..."
+    kubectl delete --ignore-not-found namespace $1 > /dev/null
+}
+
+cleanup-logs() {
+    if [ -z "${GOOD}" ]; then
+        log-debug "Dumping statefulset/spire-server logs..."
+        kubectl -nspire logs statefulset/spire-server --all-containers
+        log-debug "Dumping daemonset/spire-agent logs..."
+        kubectl -nspire logs daemonset/spire-agent --all-containers
+    fi
+    delete-ns
+    if [ -n "${GOOD}" ]; then
+        log-debug "Success."
+    else
+        log-debug "Failed."
+    fi
+}
